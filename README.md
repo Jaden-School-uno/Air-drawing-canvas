@@ -14,14 +14,14 @@ I used this tutorial to learn the basics of working with images and OpenCV, whic
 https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python
 I used this documentation to learn how to detect hands and access hand landmarks using MediaPipe. This allowed me to track finger positions and develop the gesture controls used in the application.
 
-Features
+## Features
 Hand and finger tracking using MediaPipe
 Drawing and erasing using pinch gestures
 Gesture-controlled menu
 Brush size and color selection
 Undo and clear functionality
 
-Technologies Used
+## Technologies Used
 Python
 OpenCV
 MediaPipe
