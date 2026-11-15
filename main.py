@@ -3,12 +3,13 @@ import mediapipe as mp
 import time
 import numpy as np
 import sys
+from pathlib import Path
 
 # open camera, close program if camera doesnt/cant open.
 cap = cv2.VideoCapture(0)
-if not cap:
+if not cap.isOpened():
     print("Cannot open camera")
-    exit()
+    sys.exit(1)
 
 start_time = time.time()
 button_radius = 35
@@ -19,8 +20,14 @@ HandLandmarker = mp.tasks.vision.HandLandmarker
 HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
 RunningMode = mp.tasks.vision.RunningMode
 
+model_path = Path(__file__).resolve().parent / "hand_landmarker.task"
+
+if not model_path.is_file():
+    print(f"Error: Hand landmarker model not found at {model_path}")
+    sys.exit(1)
+
 options = HandLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path="hand_landmarker.task"),
+    base_options=BaseOptions(model_asset_path=str(model_path)),
     running_mode=RunningMode.VIDEO,
     num_hands=1
 )
@@ -204,7 +211,7 @@ def draw_help(frame):
     cv2.putText(frame, "Q to Quit",
                 (20, height - 20), font, 0.5, color, 1)
 
-def draw_size_menu(frame, center, brush_size):
+def draw_size_menu(frame, center, brush_size, dragging_size):
     cx, cy = center
 
     panel_width = 110
@@ -251,7 +258,7 @@ def draw_color_menu(frame, center, cursor, draw_color):
     cv2.rectangle(frame, (left, top), (right, bottom), (40, 40, 40), -1)
 
     colors = {
-        "pink": (0, 0, 255),
+        "red": (0, 0, 255),
         "orange": (0, 165, 255),
         "yellow": (0, 255, 255),
         "green": (80, 200, 60),
@@ -346,6 +353,8 @@ menu_center = None
 peace_active = False
 wait_for_release = False
 
+last_cursor = None
+
 brush_size = 5
 
 pinch_active = False
@@ -365,12 +374,13 @@ dragging_size = False
 
 # create canvas to draw on
 ret, frame = cap.read()
-canvas = np.zeros_like(frame)
 
-# if no frame thenclose program
+# if no frame then close program
 if not ret:
     print("Cannot capture frame")
-    sys.exit()
+    sys.exit(1)
+
+canvas = np.zeros_like(frame)
 
 # loop that reads frames 1 by 1 and processes them
 while cap.isOpened():
@@ -391,15 +401,17 @@ while cap.isOpened():
     # detect the hand, detect_for_video is a object that contains 3 things hand_landmarks, hand_world_landmarks, and handedness
     result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-    # if hand detected, set hand vairable to the first hand detected. result.hand_landmarks is a list of all hands detected so 0 is the first one.
+    # if hand detected, set hand variable to the first hand detected. result.hand_landmarks is a list of all hands detected so 0 is the first one.
     # each hand is also a list so hand is now a list of 21 points, each point is an object that contains x,y,z coordinates
     if result.hand_landmarks:
         hand = result.hand_landmarks[0]
 
         thumb_tip = hand[4]
+        thumb_mcp = hand[2]
 
         index_tip = hand[8]
         index_pip = hand[6]
+        index_mcp = hand[5]
 
         middle_tip = hand[12]
         middle_pip = hand[10]
@@ -415,6 +427,11 @@ while cap.isOpened():
         middle_up = middle_tip.y < middle_pip.y
         ring_up = ring_tip.y < ring_pip.y
         pinky_up = pinky_tip.y < pinky_pip.y
+
+        # check whether thumb is folded
+        thumb_tip_distance = ((thumb_tip.x - index_mcp.x) ** 2 + (thumb_tip.y - index_mcp.y) ** 2) ** 0.5
+        thumb_mcp_distance = ((thumb_mcp.x - index_mcp.x) ** 2 + (thumb_mcp.y - index_mcp.y) ** 2) ** 0.5
+        thumb_folded = thumb_tip_distance < thumb_mcp_distance
 
         # calculate distance between index and thumb
         dx = index_tip.x - thumb_tip.x
@@ -433,8 +450,10 @@ while cap.isOpened():
         x = int(cursor_x * width)
         y = int(cursor_y * height)
 
+        last_cursor = (x, y)
+
         # define peace sign
-        peace_sign = (index_up and middle_up and not ring_up and not pinky_up)
+        peace_sign = (index_up and middle_up and not ring_up and not pinky_up and thumb_folded)
 
         # menu toggle
         if peace_sign and not peace_active:
@@ -470,7 +489,7 @@ while cap.isOpened():
 
         # draw size menu
         if size_menu_open and size_menu_center is not None:
-            slider_x, slider_top, slider_bottom, knob_y = draw_size_menu(frame, size_menu_center, brush_size)
+            slider_x, slider_top, slider_bottom, knob_y = draw_size_menu(frame, size_menu_center, brush_size, dragging_size)
 
             dx = x - slider_x
             dy = y - knob_y
@@ -560,14 +579,31 @@ while cap.isOpened():
                 prev_y = smooth_y
 
             else:
-                # new storke is beginning
-                save_history(canvas, canvas_history)
-                prev_x = x
-                prev_y = y
+                # new stroke is beginning
+                if mode in ("draw", "erase"):
+                    save_history(canvas, canvas_history)
+                    prev_x = x
+                    prev_y = y
 
         else:
             prev_x = None
             prev_y = None
+
+    # no hand detected
+    else:
+        # reset drawing position
+        prev_x = None
+        prev_y = None
+
+        # stop draggin the size slider
+        dragging_size = False
+
+        # reset gesture states
+        pinch_active = False
+        peace_active = False
+
+        # prevent drawing until a fresh pinch
+        wait_for_release = True
 
     display_frame = cv2.add(frame, canvas)
 
